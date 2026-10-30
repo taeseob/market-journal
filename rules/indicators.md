@@ -22,6 +22,7 @@
 |---|---|
 | `fred:코드` | FRED. 키 없이 CSV로 받는다. |
 | `yf:티커` | Yahoo Finance. 지표는 종가, 지수는 일봉(시가·고가·저가·종가·거래량) |
+| `yf-fill:티커/출처` | Yahoo 일봉에서 비어 있는 종가만 다른 출처로 채움 (예: `^N225/nk225jp:close`) |
 | `oecd-cli:국가` | OECD 경기선행지수 (진폭 조정) |
 | `oecd-cpi:국가:품목` | OECD 소비자물가 전년비. 품목 `_T` 전체, `_TXCP01_NRG` 식료품·에너지 제외 |
 | `ecb:데이터셋/키` | ECB Data Portal |
@@ -31,7 +32,7 @@
 | `nk225jp:per` / `nk225jp:pbr` | nikkei225jp.com이 정리한 닛케이225 예상 PER·PBR (닛케이 공표 가중평균 기준) |
 | `hkma:hibor3m` | 홍콩금융관리국 HIBOR 3개월 |
 | `ecos:통계표/주기/항목` | 한국은행 ECOS. 주기 `D` 일간, `M` 월간 (예: `817Y002/D/010200000` 국고채 3년) |
-| `krx:이름` | KRX 정보데이터시스템 (pykrx). `kospi_pbr` KOSPI PBR, `kospi_foreign` KOSPI 외국인 순매수 |
+| `krx:이름` | KRX 정보데이터시스템 (pykrx). `kospi_pbr` KOSPI PBR, `kospi_foreign` KOSPI 외국인 순매수, `index/코드` 지수 일봉 (1001 KOSPI, 2001 KOSDAQ) |
 | `estat:통계표/품목/지역/표장` | 일본 e-Stat (예: `0004052037/0161/00000/3` 전국 신선식품 제외 CPI 전년비) |
 | `ak:이름` | AKShare. 이름별 수집 방법은 `scripts/sources.py` |
 | `calc:식` | 다른 시계열로 계산. `{id}` 또는 `{출처}`를 쓴다. 식에서 처음 나오는 시계열의 날짜를 기준으로 계산하고, 나머지는 그 날짜 직전 값을 쓴다. |
@@ -94,7 +95,8 @@
 
 | id | 지표 | 차트 설명 | 단위 | 주기 | 변환 | 기준선 | 출처 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| us_hy_oas | 하이일드 스프레드 | 신용 위험 · 급확대 = 위험 회피 | %p | 일 | level | — | fred:BAMLH0A0HYM2 | |
+| us_hy_oas | 하이일드 스프레드 | 신용 위험 · 급확대 = 위험 회피 | %p | 일 | level | — | fred:BAMLH0A0HYM2 | ICE 데이터. FRED가 최근 3년만 제공 |
+| us_baa10y | Baa 회사채 스프레드 (Baa − 국채 10년) | 투자등급 하단 신용 위험 · 확대 = 위험 회피 | %p | 일 | level | — | fred:BAA10Y | Moody's. 장기 이력용 |
 | us_nfci | 금융여건지수 (NFCI) | 0 위 = 평균보다 긴축적 | pt | 주 | level | 0 | fred:NFCI | |
 | us_sloos | 은행 대출태도 (기업대출) | 기준 강화 비율 · 6~12개월 뒤 신용 공급 | % | 분기 | level | 0 | fred:DRTSCILM | |
 
@@ -123,8 +125,8 @@
 
 | id | 지수 | 출처 | 거래량 | 마감(KST) | 비고 |
 |---|---|---|---|---|---|
-| kospi | KOSPI | yf:^KS11 | = 지수 | 16:00 | |
-| kosdaq | KOSDAQ | yf:^KQ11 | = 지수 | 16:00 | |
+| kospi | KOSPI | krx:index/1001 | = 지수 | 16:00 | 한국거래소 공식 일봉 (Yahoo는 2026-10-30 종가 누락) |
+| kosdaq | KOSDAQ | krx:index/2001 | = 지수 | 16:00 | 한국거래소 공식 일봉 |
 
 ### 1. 경기
 
@@ -243,7 +245,7 @@
 
 | id | 지수 | 출처 | 거래량 | 마감(KST) | 비고 |
 |---|---|---|---|---|---|
-| n225 | 닛케이225 | yf:^N225 | = 지수 | 16:00 | |
+| n225 | 닛케이225 | yf-fill:^N225/nk225jp:close | = 지수 | 16:00 | Yahoo 일봉. Yahoo에 종가가 비어 있는 날은 nikkei225jp.com 종가로 채움 |
 | topix | TOPIX (ETF 대용) | yf:1306.T | = 지수 | 16:00 | TOPIX 지수 시계열이 없어 TOPIX 연동 ETF(1306) 가격으로 대체 |
 
 ### 1. 경기
@@ -279,7 +281,7 @@
 
 | id | 지표 | 차트 설명 | 단위 | 주기 | 변환 | 기준선 | 출처 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| n225_fwd_eps | 닛케이225 예상 EPS | 이익 방향 · 상향 = 주가 지지 | 엔 | 일 | level | — | calc:{n225}/{n225_fwd_pe} | |
+| n225_fwd_eps | 닛케이225 예상 EPS | 이익 방향 · 상향 = 주가 지지 | 엔 | 일 | level | — | calc:1/{n225_fwd_pe}*{n225} | PER이 있는 날짜 기준으로 계산 |
 | n225_fwd_pe | 닛케이225 예상 PER | 밸류에이션 수준 | 배 | 일 | level | — | nk225jp:per | 닛케이 공표치(가중평균), nikkei225jp.com 경유 |
 | n225_pbr | 닛케이225 PBR | 1배 = 순자산 가치 · 낮을수록 저평가 | 배 | 일 | level | 1 | nk225jp:pbr | 닛케이 공표치(가중평균), nikkei225jp.com 경유 |
 
@@ -332,7 +334,8 @@
 
 | id | 지표 | 차트 설명 | 단위 | 주기 | 변환 | 기준선 | 출처 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| ez_hy_oas | 유로 하이일드 스프레드 | 신용 위험 · 급확대 = 위험 회피 | %p | 일 | level | — | fred:BAMLHE00EHYIOAS | |
+| ez_hy_oas | 유로 하이일드 스프레드 | 신용 위험 · 급확대 = 위험 회피 | %p | 일 | level | — | fred:BAMLHE00EHYIOAS | ICE 데이터. FRED가 최근 3년만 제공 |
+| ez_ciss | ECB 금융시스템 스트레스 지수 (CISS) | 0~1 · 상승 = 금융 스트레스 확대 | pt | 일 | level | — | ecb:CISS/D.U2.Z0Z.4F.EC.SS_CIN.IDX | 채권·주식·외환·금융기관 스트레스 종합. 장기 이력용 |
 | ez_bls | 은행 대출 서베이 (기업대출 기준) | 기준 강화 순비율 · 0 위 = 긴축 | % | 분기 | level | 0 | ecb:BLS/Q.U2.ALL.O.E.Z.B3.ST.S.WFNET | |
 | ez_loans | 기업 대출 증가율 | 실제 신용 흐름 | % (전년비) | 월 | level | — | ecb:BSI/M.U2.Y.U.A20T.A.I.U2.2240.Z01.A | |
 

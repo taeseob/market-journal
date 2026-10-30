@@ -16,8 +16,11 @@ import spec
 
 CACHE = spec.ROOT / "data" / "cache"
 STATUS = CACHE / "_status.json"
-# 3년 차트 + 20주 이동평균 + 전년비 계산에 필요한 기간
-LOOKBACK = pd.DateOffset(years=4, months=6)
+
+
+def lookback(years):
+    """차트 기간 + 20개월 이동평균(월봉) + 전년비 계산에 필요한 기간."""
+    return pd.DateOffset(years=years, months=33)
 
 
 def cache_key(source, ohlcv=False):
@@ -54,12 +57,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--date", default=f"{date.today():%Y-%m-%d}")
     p.add_argument("--market")
+    p.add_argument("--years", type=int, default=10, help="차트 기간(년). 월간 보고서 10, 일간 보고서 3")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     warnings.filterwarnings("ignore")
 
     markets = [m for m in spec.load() if not args.market or m.code == args.market]
-    start = pd.Timestamp(args.date) - LOOKBACK
+    start = pd.Timestamp(args.date) - lookback(args.years)
     CACHE.mkdir(parents=True, exist_ok=True)
     status = json.loads(STATUS.read_text(encoding="utf-8")) if STATUS.exists() else {}
 

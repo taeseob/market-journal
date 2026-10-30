@@ -83,7 +83,7 @@ def fred(code, start):
     return s[s.index >= start]
 
 
-def yf_daily(ticker, start):
+def _yf_raw(ticker, start):
     import yfinance as yf
 
     d = yf.download(ticker, start=f"{start:%Y-%m-%d}", interval="1d", auto_adjust=False,
@@ -94,6 +94,18 @@ def yf_daily(ticker, start):
     d.index = pd.DatetimeIndex(d.index)
     if d.index.tz is not None:
         d.index = d.index.tz_localize(None)
+    return d
+
+
+def yf_daily(ticker, start):
+    return _yf_raw(ticker, start).dropna(subset=["close"])
+
+
+def yf_fill(spec, start):
+    """Yahoo 일봉에서 비어 있는 종가를 다른 출처의 종가로 채운다. spec: 티커/출처, 예: ^N225/nk225jp:close"""
+    ticker, other = spec.split("/", 1)
+    d = _yf_raw(ticker, start)
+    d["close"] = d["close"].fillna(fetch(other, start).reindex(d.index))
     return d.dropna(subset=["close"])
 
 
@@ -168,8 +180,8 @@ def em(spec, start):
 
 
 def nk225jp(field, start):
-    """nikkei225jp.com 일간 데이터 (닛케이 공표 가중평균 기준). field: per = 예상 PER, pbr = PBR"""
-    col = {"per": 12, "pbr": 13}[field]
+    """nikkei225jp.com 일간 데이터. field: close = 닛케이225 종가, per = 예상 PER, pbr = PBR (닛케이 공표 가중평균)"""
+    col = {"close": 1, "per": 12, "pbr": 13}[field]
     url = "https://nikkei225jp.com/_data/_nfsDATA/data_DAY/daily2.json"
     text = _get(url, headers={**HEADERS, "Referer": "https://nikkei225jp.com/data/per.php"}).text
     dates, values = [], []
@@ -222,12 +234,19 @@ def ecos(spec, start):
 
 
 def krx(name, start):
-    """KRX 정보데이터시스템 (pykrx, 회원 계정 로그인). name: kospi_pbr | kospi_foreign"""
+    """KRX 정보데이터시스템 (pykrx, 회원 계정 로그인).
+    name: kospi_pbr | kospi_foreign | index/지수코드 (일봉, 예: index/1001 KOSPI, index/2001 KOSDAQ)"""
     _secret("KRX_ID"), _secret("KRX_PW")
     end = pd.Timestamp.today()
     with contextlib.redirect_stdout(io.StringIO()):  # pykrx는 로그인할 때 아이디를 출력한다
         from pykrx import stock
 
+        if name.startswith("index/"):
+            d = stock.get_index_ohlcv(f"{start:%Y%m%d}", f"{end:%Y%m%d}", name.split("/")[1])
+            d = d.rename(columns={"시가": "open", "고가": "high", "저가": "low", "종가": "close", "거래량": "volume"})
+            d = d[["open", "high", "low", "close", "volume"]].astype(float)
+            d.index = pd.DatetimeIndex(d.index)
+            return d[d["close"] > 0]
         if name == "kospi_pbr":
             s = stock.get_index_fundamental(f"{start:%Y%m%d}", f"{end:%Y%m%d}", "1001")["PBR"]
             s = s[s > 0]
@@ -348,8 +367,8 @@ AK = {
 
 # --- 진입점 ----------------------------------------------------------------
 
-API_KINDS = ("fred", "yf", "oecd-cli", "oecd-cpi", "ecb", "mof-jp", "mof-flow", "hkma", "ak", "em", "nk225jp",
-             "ecos", "krx", "estat")
+API_KINDS = ("fred", "yf", "yf-fill", "oecd-cli", "oecd-cpi", "ecb", "mof-jp", "mof-flow", "hkma", "ak", "em",
+             "nk225jp", "ecos", "krx", "estat")
 
 
 def fetch(source, start, ohlcv=False):
@@ -357,6 +376,9 @@ def fetch(source, start, ohlcv=False):
     kind, _, arg = source.partition(":")
     if kind == "yf":
         d = yf_daily(arg, start)
+        return d if ohlcv else d["close"]
+    if kind == "yf-fill":
+        d = yf_fill(arg, start)
         return d if ohlcv else d["close"]
     if kind == "ak":
         d = AK[arg](start)
@@ -383,7 +405,8 @@ def fetch(source, start, ohlcv=False):
     if kind == "ecos":
         return ecos(arg, start)
     if kind == "krx":
-        return krx(arg, start)
+        d = krx(arg, start)
+        return d["close"] if isinstance(d, pd.DataFrame) and not ohlcv else d
     if kind == "estat":
         return estat(arg, start)
     raise ValueError(f"알 수 없는 출처: {source}")

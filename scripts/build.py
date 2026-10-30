@@ -1,6 +1,8 @@
 """수집한 데이터로 차트, 표, 보고서 마크다운을 만든다.
 
-사용법: python scripts/build.py [--date YYYY-MM-DD] [--market kr]
+사용법: python scripts/build.py [--date YYYY-MM-DD] [--market kr] [--edition daily|monthly] [--asof "YYYY-MM-DD HH:MM"]
+  daily   일간 보고서: reports/YYYY/YYYY-MM-DD/, 지표 3년, 지수 주봉 3년
+  monthly 월간 보고서: reports/YYYY/YYYY-MM/,    지표 10년, 지수 월봉 10년
 
 한 줄 요약과 주요 요인은 보고서 파일의 summary/factors 표시 사이에 직접 쓴다.
 스크립트를 다시 실행해도 그 부분은 그대로 남는다.
@@ -11,6 +13,7 @@ import math
 import re
 import sys
 import warnings
+from dataclasses import dataclass
 from datetime import date
 
 import matplotlib
@@ -33,7 +36,26 @@ SURFACE, INK, INK2, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#
 LINE, UP, DOWN, MA5, MA20 = "#2a78d6", "#e34948", "#2a78d6", "#eda100", "#52514e"
 
 STALE_DAYS = {"일": 7, "주": 21, "월": 75, "분기": 230, "연": 450}
-SOURCE_NAMES = {"fred": "FRED", "yf": "Yahoo Finance", "oecd-cli": "OECD", "oecd-cpi": "OECD", "ecb": "ECB",
+
+
+@dataclass(frozen=True)
+class Edition:
+    key: str
+    years: int          # 지표·지수 차트 기간
+    candle: str         # 지수 캔들 주기 (pandas resample 규칙)
+    candle_name: str
+    ma_unit: str        # 이동평균 단위 (5주·20주, 5개월·20개월)
+    folder: str         # 발행 폴더 이름 형식
+    folder_re: str
+    title_suffix: str
+
+
+EDITIONS = {
+    "daily": Edition("daily", 3, "W-FRI", "주봉", "주", "%Y-%m-%d", r"\d{4}-\d\d-\d\d", ""),
+    "monthly": Edition("monthly", 10, "ME", "월봉", "개월", "%Y-%m", r"\d{4}-\d\d", " (10년)"),
+}
+SOURCE_NAMES = {"fred": "FRED", "yf": "Yahoo Finance", "yf-fill": "Yahoo Finance·nikkei225jp.com",
+                "oecd-cli": "OECD", "oecd-cpi": "OECD", "ecb": "ECB",
                 "mof-jp": "일본 재무성", "mof-flow": "일본 재무성", "hkma": "HKMA", "ak": "AKShare", "em": "동방재부",
                 "nk225jp": "nikkei225jp.com", "ecos": "한국은행 ECOS", "krx": "KRX", "estat": "e-Stat",
                 "manual": "수동 입력"}
@@ -248,7 +270,7 @@ class Store:
         if ind.transform == "cumsum":
             w = w.cumsum()
         if w.empty:
-            raise Missing("최근 3년 데이터 없음")
+            raise Missing("차트 기간에 데이터 없음")
         return w
 
     def is_stale(self, ind, s):
@@ -264,24 +286,46 @@ def _panel_header(ax, title, desc):
     ax.text(0, 1.035, desc.replace("−", "-"), transform=ax.transAxes, fontsize=8.5, color=INK2, va="bottom")
 
 
-def _date_axis(ax, start, end):
+def _date_axis(ax, start, end, years):
     ax.set_xlim(start, end)
-    ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 7)))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    if years > 5:
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    else:
+        ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 7)))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
 
 
-def axis_chart(store, market, axis, pub, path):
+def clip_limits(s, ref):
+    """극단값(중앙값 ± 사분위범위 6배 밖)이 축을 지배하면 잘라 낼 y축 범위를 돌려준다. 자를 필요가 없으면 None.
+    최근 1년의 값과 기준선은 자르지 않는다."""
+    q1, med, q3 = s.quantile([0.25, 0.5, 0.75])
+    iqr = q3 - q1
+    if iqr <= 0:
+        return None
+    lo, hi = med - 6 * iqr, med + 6 * iqr
+    recent = s[s.index > s.index[-1] - pd.Timedelta(days=365)]
+    keep = [recent.min(), recent.max()] + ([ref] if ref is not None else [])
+    inside = s[(s >= lo) & (s <= hi)]
+    lo, hi = min([inside.min()] + keep), max([inside.max()] + keep)
+    if s.min() >= lo and s.max() <= hi:
+        return None
+    pad = (hi - lo) * 0.06
+    return lo - pad, hi + pad
+
+
+def axis_chart(store, market, axis, pub, path, ed):
     """한 축의 지표를 지표당 패널 하나로 그린다. 돌려주는 값: 데이터 메모 목록."""
     inds = axis.indicators
     ncols = 1 if len(inds) <= 3 else 2
     nrows = math.ceil(len(inds) / ncols)
     fig, axs = plt.subplots(nrows, ncols, figsize=(12, 2.55 * nrows + 1.0), squeeze=False)
-    start = pub - pd.DateOffset(years=3)
-    end = pub + pd.Timedelta(days=120)
+    start = pub - pd.DateOffset(years=ed.years)
+    end = pub + pd.Timedelta(days=int(365 * ed.years * 0.11))  # 마지막 값 표시 자리
     memo = []
     for k, ind in enumerate(inds):
         ax = axs[k // ncols][k % ncols]
-        _date_axis(ax, start, end)
+        _date_axis(ax, start, end, ed.years)
         try:
             s = store.window(ind, start)
         except Missing as e:
@@ -295,20 +339,34 @@ def axis_chart(store, market, axis, pub, path):
         title = label(ind)
         if ind.source == "manual" and len(s) < 12:
             memo.append(f"{ind.name}: 수동 입력 값 {len(s)}개뿐 ({fmt_period(s.index[0], ind.freq)}부터)")
+        elif s.index[0] > start + pd.Timedelta(days=180):
+            memo.append(f"{ind.name}: 이력이 {fmt_period(s.index[0], ind.freq)}부터만 있음")
         if store.is_stale(ind, s):
             title += f"  (최신 {fmt_period(last, ind.freq)})"
             memo.append(f"{ind.name}: 최신 데이터가 {fmt_period(last, ind.freq)}로 지연")
-        _panel_header(ax, title, ind.desc)
+        limits, desc = clip_limits(s, ind.ref), ind.desc
+        if limits:
+            notes = []
+            if s.max() > limits[1]:
+                notes.append(f"최고 {fmt_value(s.max(), ind.unit)} ({fmt_period(s.idxmax(), ind.freq)})")
+            if s.min() < limits[0]:
+                notes.append(f"최저 {fmt_value(s.min(), ind.unit)} ({fmt_period(s.idxmin(), ind.freq)})")
+            desc += "  · 축 밖: " + ", ".join(notes)
+            memo.append(f"{ind.name}: 극단값을 축 밖으로 잘라 그림 ({', '.join(notes)})")
+        _panel_header(ax, title, desc)
         if ind.freq == "수시":
             ax.step(s.index, s.to_numpy(), where="post", color=LINE, lw=1.5)
         else:
-            marker = "o" if ind.freq in ("월", "분기", "연") else None
+            dotted = ("분기", "연") if ed.years > 5 else ("월", "분기", "연")  # 10년 차트의 월간 점은 너무 빽빽하다
+            marker = "o" if ind.freq in dotted else None
             ax.plot(s.index, s.to_numpy(), color=LINE, lw=1.5, marker=marker, ms=2.5)
         if ind.ref is not None:
             ax.axhline(ind.ref, color=MUTED, lw=1, ls=(0, (4, 3)))
         ax.plot([last], [v], marker="o", ms=4.5, color=LINE)
         ax.annotate(f"{fmt_value(v, ind.unit)}\n{fmt_period(last, ind.freq)}", xy=(last, v), xytext=(7, 0),
                     textcoords="offset points", va="center", fontsize=8.5, color=INK)
+        if limits:
+            ax.set_ylim(*limits)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:,.10g}"))
     for k in range(len(inds), nrows * ncols):
         axs[k // ncols][k % ncols].set_visible(False)
@@ -322,22 +380,29 @@ def axis_chart(store, market, axis, pub, path):
     return memo
 
 
-def weekly(daily):
-    w = daily.resample("W-FRI").agg({"open": "first", "high": "max", "low": "min", "close": "last",
-                                     "volume": "sum"}).dropna(subset=["close"])
+def candles(daily, rule):
+    """일봉을 주봉(W-FRI) 또는 월봉(ME)으로 묶고 5·20기간 이동평균을 붙인다."""
+    w = daily.resample(rule).agg({"open": "first", "high": "max", "low": "min", "close": "last",
+                                  "volume": "sum"}).dropna(subset=["close"])
     for n in (5, 20):
         w[f"ma{n}"] = w["close"].rolling(n).mean()
         w[f"vma{n}"] = w["volume"].rolling(n).mean()
     return w
 
 
-def candle_chart(store, market, idx, pub, path):
+def candle_chart(store, market, idx, pub, path, ed):
     daily = store.ohlcv(idx.id)
-    start = pub - pd.DateOffset(years=3)
-    w = weekly(daily)
+    start = pub - pd.DateOffset(years=ed.years)
+    w = candles(daily, ed.candle)
     w = w[w.index >= start]
-    in_progress = daily.index[-1] < w.index[-1] and pub <= w.index[-1]
-    x = mdates.date2num(w.index - pd.Timedelta(days=2))  # 캔들을 주 가운데(수요일)에 둔다
+    # 마지막 캔들 기간의 마지막 평일까지 데이터가 없으면 진행 중인 기간이다
+    last_bday = w.index[-1]
+    while last_bday.weekday() >= 5:
+        last_bday -= pd.Timedelta(days=1)
+    in_progress = daily.index[-1] < last_bday
+    monthly = ed.candle != "W-FRI"
+    shift, width = (pd.Timedelta(days=15), 20) if monthly else (pd.Timedelta(days=2), 4.2)
+    x = mdates.date2num(w.index - shift)  # 캔들을 기간 가운데에 둔다
     colors = np.where(w["close"] >= w["open"], UP, DOWN)
 
     fig, (ax, axv) = plt.subplots(2, 1, figsize=(12, 6.4), sharex=True,
@@ -345,9 +410,9 @@ def candle_chart(store, market, idx, pub, path):
     ax.vlines(x, w["low"], w["high"], colors=colors, lw=0.8)
     body = (w["close"] - w["open"]).abs().to_numpy()
     body = np.maximum(body, (w["high"].max() - w["low"].min()) * 0.002)
-    ax.bar(x, body, bottom=np.minimum(w["open"], w["close"]), width=4.2, color=colors, linewidth=0)
-    ax.plot(x, w["ma5"], color=MA5, lw=1.5, label="5주 이평")
-    ax.plot(x, w["ma20"], color=MA20, lw=1.5, label="20주 이평")
+    ax.bar(x, body, bottom=np.minimum(w["open"], w["close"]), width=width, color=colors, linewidth=0)
+    ax.plot(x, w["ma5"], color=MA5, lw=1.5, label=f"5{ed.ma_unit} 이평")
+    ax.plot(x, w["ma20"], color=MA20, lw=1.5, label=f"20{ed.ma_unit} 이평")
     ax.legend(loc="upper left", frameon=False, fontsize=9)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:,.0f}" if abs(y) >= 100 else f"{y:,.2f}"))
     last = w["close"].iloc[-1]
@@ -363,7 +428,7 @@ def candle_chart(store, market, idx, pub, path):
         axv.set_yticks([])
         vol_memo = f"{idx.name}: 거래량 데이터 없음"
     else:
-        axv.bar(x, w["volume"], width=4.2, color=colors, alpha=0.5, linewidth=0)
+        axv.bar(x, w["volume"], width=width, color=colors, alpha=0.5, linewidth=0)
         axv.plot(x, w["vma5"], color=MA5, lw=1.5)
         axv.plot(x, w["vma20"], color=MA20, lw=1.5)
         axv.yaxis.set_major_formatter(FuncFormatter(kr_units))
@@ -371,11 +436,17 @@ def candle_chart(store, market, idx, pub, path):
                      textcoords="offset points", va="center", fontsize=8.5, color=INK)
         vol_memo = None
     axv.set_ylabel("거래량 (출처 단위)", color=INK2)
-    axv.set_xlim(mdates.date2num(start - pd.Timedelta(days=7)), mdates.date2num(pub + pd.Timedelta(days=70)))
-    axv.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 4, 7, 10)))
-    axv.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    pad_left, pad_right = (35, 250) if monthly else (7, 70)
+    axv.set_xlim(mdates.date2num(start - pd.Timedelta(days=pad_left)),
+                 mdates.date2num(pub + pd.Timedelta(days=pad_right)))
+    if monthly:
+        axv.xaxis.set_major_locator(mdates.YearLocator())
+        axv.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    else:
+        axv.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 4, 7, 10)))
+        axv.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
 
-    fig.suptitle(f"{idx.name} · 주봉 · 기준일 {pub:%Y-%m-%d}", x=0.01, ha="left", fontsize=14,
+    fig.suptitle(f"{idx.name} · {ed.candle_name} · 기준일 {pub:%Y-%m-%d}", x=0.01, ha="left", fontsize=14,
                  fontweight="bold", color=INK)
     fig.text(0.01, 0.005, "출처: " + ", ".join(source_names([idx.source])), fontsize=8, color=MUTED)
     fig.subplots_adjust(left=0.07, right=0.92, top=0.92, bottom=0.07)
@@ -453,42 +524,54 @@ def correction_section(path):
     return None
 
 
-def previous_report(market, pub):
+def front_matter(path, key):
+    m = re.search(rf"^{key}: (.+)$", path.read_text(encoding="utf-8"), re.M)
+    return m.group(1).strip() if m else None
+
+
+def previous_report(market, pub, ed):
+    """같은 종류(일간·월간) 보고서 중 발행일이 pub보다 앞선 가장 최근 것."""
     found = []
     for p in REPORTS.glob(f"*/*/{market.order}-{market.code}.md"):
-        try:
-            d = pd.Timestamp(p.parent.name)
-        except ValueError:
+        if not re.fullmatch(ed.folder_re, p.parent.name):
             continue
+        d = pd.Timestamp(front_matter(p, "date") or p.parent.name)
         if d < pub:
             found.append((d, p))
     return max(found) if found else None
 
 
-def build_market(store, market, pub):
-    out = REPORTS / f"{pub:%Y}" / f"{pub:%Y-%m-%d}"
+def out_dir(pub, ed):
+    return REPORTS / f"{pub:%Y}" / pub.strftime(ed.folder)
+
+
+def build_market(store, market, pub, ed):
+    out = out_dir(pub, ed)
     charts = out / "charts"
     charts.mkdir(parents=True, exist_ok=True)
     path = out / f"{market.order}-{market.code}.md"
     blocks = preserved_blocks(path)
     correction = correction_section(path)
-    prev = previous_report(market, pub)
-    period_start = prev[0] + pd.Timedelta(days=1) if prev else pub - pd.DateOffset(months=1)
+    prev = previous_report(market, pub, ed)
+    if prev:
+        period_start = prev[0] + pd.Timedelta(days=1)
+    else:  # 첫 보고서: 일간은 최근 1개월, 월간은 그 달 1일부터
+        period_start = pub - pd.DateOffset(months=1) if ed.key == "daily" else pub.replace(day=1)
     prev_rel = prev[1].relative_to(spec.ROOT).as_posix() if prev else "none"
-    start = pub - pd.DateOffset(years=3)
+    start = pub - pd.DateOffset(years=ed.years)
 
-    lines = ["---", f"market: {market.code}", f"title: {market.title}", f"date: {pub:%Y-%m-%d}",
-             f"asof: {store.asof:%Y-%m-%d %H:%M}",
+    lines = ["---", f"market: {market.code}", f"title: {market.title}{ed.title_suffix}", f"edition: {ed.key}",
+             f"date: {pub:%Y-%m-%d}", f"asof: {store.asof:%Y-%m-%d %H:%M}",
              f"period: {period_start:%Y-%m-%d} ~ {pub:%Y-%m-%d}", f"prev: {prev_rel}", "---", "",
-             f"# {market.title} · {pub:%Y-%m-%d}", "", "## 1. 시장 요약", "",
+             f"# {market.title}{ed.title_suffix} · {out.name}", "", "## 1. 시장 요약", "",
              "<!-- summary:start -->", blocks["summary"], "<!-- summary:end -->", "",
              "### 지수 현황", "", f"기준: 발행 시점({store.asof:%Y-%m-%d %H:%M} KST)에 확정된 각 지수의 직전 종가", ""]
     rows, images, idx_memo = [], [], []
     for idx in market.indices:
         try:
             rows.append(index_row(store, idx))
-            vol_memo = candle_chart(store, market, idx, pub, charts / f"{market.code}-0-index-{idx.id}.png")
-            images.append(f"![{idx.name} 주봉](charts/{market.code}-0-index-{idx.id}.png)")
+            vol_memo = candle_chart(store, market, idx, pub, charts / f"{market.code}-0-index-{idx.id}.png", ed)
+            images.append(f"![{idx.name} {ed.candle_name}](charts/{market.code}-0-index-{idx.id}.png)")
             if vol_memo:
                 idx_memo.append(vol_memo)
         except Missing as e:
@@ -501,12 +584,12 @@ def build_market(store, market, pub):
     if idx_memo:
         lines += ["데이터 메모:", ""] + [f"- {m}" for m in idx_memo] + [""]
     lines += ["### 주요 요인", "", "<!-- factors:start -->", blocks["factors"], "<!-- factors:end -->", "",
-              "## 2. 지표 (최근 3년)", ""]
+              f"## 2. 지표 (최근 {ed.years}년)", ""]
 
     all_memo = list(idx_memo)
     for axis in market.axes:
         name = f"{market.code}-{axis.order}-{axis.code}.png"
-        memo = axis_chart(store, market, axis, pub, charts / name)
+        memo = axis_chart(store, market, axis, pub, charts / name, ed)
         all_memo += memo
         lines += [f"### 2.{axis.order} {axis.label}", "", f"![{axis.label}](charts/{name})", ""]
         lines += md_table(["지표", "최신값", "기준 시점", "3개월 전", "1년 전"],
@@ -522,12 +605,12 @@ def build_market(store, market, pub):
     return path, all_memo
 
 
-def existing_asof(pub):
-    """같은 발행일 보고서가 이미 있으면 그 발행 시점을 돌려준다 (다시 만들어도 수치가 바뀌지 않게)."""
-    for p in sorted((REPORTS / f"{pub:%Y}" / f"{pub:%Y-%m-%d}").glob("*.md")):
-        m = re.search(r"^asof: (\d{4}-\d\d-\d\d \d\d:\d\d)$", p.read_text(encoding="utf-8"), re.M)
-        if m:
-            return pd.Timestamp(m.group(1))
+def existing_asof(folder):
+    """같은 폴더의 보고서가 이미 있으면 그 발행 시점을 돌려준다 (다시 만들어도 수치가 바뀌지 않게)."""
+    for p in sorted(folder.glob("*.md")):
+        asof = front_matter(p, "asof")
+        if asof:
+            return pd.Timestamp(asof)
     return None
 
 
@@ -535,17 +618,21 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--date", default=f"{date.today():%Y-%m-%d}")
     p.add_argument("--market")
+    p.add_argument("--edition", choices=EDITIONS, default="daily")
+    p.add_argument("--asof", help="발행 시점(KST)을 직접 지정. 예: '2026-10-30 23:59'")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     warnings.filterwarnings("ignore")
 
     pub = pd.Timestamp(args.date)
+    ed = EDITIONS[args.edition]
     markets = spec.load()
-    store = Store(markets, pub, existing_asof(pub))
+    asof = pd.Timestamp(args.asof) if args.asof else existing_asof(out_dir(pub, ed))
+    store = Store(markets, pub, asof)
     for m in markets:
         if args.market and m.code != args.market:
             continue
-        path, memo = build_market(store, m, pub)
+        path, memo = build_market(store, m, pub, ed)
         print(f"{path.relative_to(spec.ROOT).as_posix()}  (데이터 메모 {len(memo)}건)")
         for line in memo:
             print(f"  - {line}")
