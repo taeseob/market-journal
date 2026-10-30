@@ -1,1 +1,36 @@
 date,id,value,released,source,note
+2023-10-01,jp_tankan,13,,https://www.boj.or.jp/statistics/tk/yoshi/tk2403.htm,2023년 12월 조사
+2024-01-01,jp_tankan,11,2024-04-01,https://www.boj.or.jp/statistics/tk/yoshi/tk2403.htm,2024년 3월 조사
+2024-04-01,jp_tankan,13,,https://stock-marketdata.com/di.html,2024년 6월 조사
+2024-07-01,jp_tankan,13,,https://stock-marketdata.com/di.html,2024년 9월 조사
+2024-10-01,jp_tankan,14,,https://stock-marketdata.com/di.html,2024년 12월 조사
+2025-01-01,jp_tankan,12,,https://stock-marketdata.com/di.html,2025년 3월 조사
+2025-04-01,jp_tankan,13,,https://stock-marketdata.com/di.html,2025년 6월 조사
+2025-07-01,jp_tankan,14,,https://stock-marketdata.com/di.html,2025년 9월 조사
+2025-10-01,jp_tankan,15,,https://stock-marketdata.com/di.html,2025년 12월 조사
+2026-01-01,jp_tankan,17,,https://stock-marketdata.com/di.html,2026년 3월 조사
+2026-04-01,jp_tankan,22,,https://stock-marketdata.com/di.html,2026년 6월 조사
+2026-07-01,jp_tankan,24,2026-10-01,https://stock-marketdata.com/di.html,2026년 9월 조사. Trading Economics와 대조
+2024-01-01,jp_shunto,5.1,,https://jinzainews.net/26813460/,렌고 최종 집계
+2025-01-01,jp_shunto,5.25,,https://jinzainews.net/26813460/,렌고 최종 집계
+2026-01-01,jp_shunto,5.01,2026-07-03,https://www.jiji.com/jc/article?k=2026070300852&g=eco,렌고 최종 집계. 인재뉴스와 대조
+2026-08-01,ez_pmi_comp,52.0,,https://tradingeconomics.com/euro-area/composite-pmi,확정치
+2026-09-01,ez_pmi_comp,53.1,,https://tradingeconomics.com/euro-area/composite-pmi,확정치. FXStreet 10월 속보 기사의 전월치와 일치
+2026-10-01,ez_pmi_comp,51.9,2026-10-23,https://www.fxstreet.com/news/eurozone-hcob-composite-pmi-declines-to-519-in-october-vs-527-expected-202610230806,속보치
+2026-08-01,de_pmi_mfg,54.3,,https://tradingeconomics.com/germany/manufacturing-pmi,확정치
+2026-09-01,de_pmi_mfg,53.9,,https://tradingeconomics.com/germany/manufacturing-pmi,확정치 (속보 53.8에서 상향)
+2026-10-01,de_pmi_mfg,54.2,2026-10-23,https://investinglive.com/news/germany-october-flash-manufacturing-pmi-54-2-vs-53-5-expected/,속보치. Trading Economics와 대조
+2026-08-01,cn_tsf,7.2,,https://srnnews.com/china-september-new-bank-loans-jump-more-than-expected-on-stimulus-seasonal-boost/,로이터 보도의 전월치
+2026-09-01,cn_tsf,7.1,,https://srnnews.com/china-september-new-bank-loans-jump-more-than-expected-on-stimulus-seasonal-boost/,9월 말 잔액 468.17조 위안
+2026-08-01,cn_property_sales,-13.1,,https://www.factiq.com/updates/china-september-2026-data-property-investment-drop-deepens-to-20-6-so-far-this-1218,"신규 주택 판매액, 1~8월 누계"
+2026-09-01,cn_property_sales,-13.7,2026-10-19,https://www.factiq.com/updates/china-september-2026-data-property-investment-drop-deepens-to-20-6-so-far-this-1218,"신규 주택 판매액, 1~9월 누계"
+2026-08-01,hsi_pe,14.16,,https://www.hsi.com.hk/static/uploads/contents/en/dl_centre/factsheets/hsie.pdf,항셍지수공사 2026년 8월 팩트시트 (8/31 기준)
+2026-09-01,hsi_pe,13.79,,https://en.macromicro.me/series/31679/hong-kong-hang-seng-index-pe-ratio,MacroMicro 집계 (8월 값이 공식 팩트시트와 일치)
+2026-07-01,jp_real_wage,2.0,2026-10-07,https://www.japantimes.co.jp/business/2026/10/07/economy/takaichi-real-wages/,수정치
+2026-08-01,jp_real_wage,1.5,2026-10-07,http://www.xinhuanet.com/english/asiapacific/20261007/174d5f7a6f6d49d78915f4e6dc658701/c.html,속보치
+2026-09-30,spx_fwd_eps,402.71,2026-10-23,https://insight.factset.com/sp-500-earnings-season-update-october-23-2026,"FactSet 선행 PER 19.0배에서 환산 (S&P500 7,651.54)"
+2026-10-09,spx_fwd_eps,408.98,2026-10-09,https://advantage.factset.com/hubfs/Website/Resources%20Section/Research%20Desk/Earnings%20Insight/EarningsInsight_100926.pdf,"FactSet 선행 PER 19.1배에서 환산 (S&P500 7,811.54)"
+2026-10-16,spx_fwd_eps,403.13,2026-10-16,https://insight.factset.com/sp-500-earnings-season-update-october-16-2026,"FactSet 선행 PER 19.0배에서 환산 (S&P500 7,659.44)"
+2026-10-23,spx_fwd_eps,407.68,2026-10-23,https://insight.factset.com/sp-500-earnings-season-update-october-23-2026,"FactSet 선행 PER 18.7배에서 환산 (S&P500 7,623.68)"
+2026-10-16,kospi_fwd_eps,1321.22,2026-10-16,https://www.hankyung.com/article/2026101671401,"한국경제 보도 선행 PER 4.29배에서 환산 (KOSPI 5,668.05). 산출 기준 미기재"
+2026-08-26,stoxx600_fwd_eps,44.96,2026-08-26,https://live.euronext.com/en/financial-news/stoxx-600-seen-rising-modestly-year-end-reuters-poll,로이터 조사 기사의 선행 PER 약 14.6배에서 환산 (STOXX 600 656.41)

@@ -131,6 +131,60 @@ def mof_jp(tenor, start):
     return s[s.index >= start]
 
 
+def mof_flow(kind, start):
+    """일본 재무성 주간 대내외 증권투자. kind: equity_inflow = 비거주자의 일본 주식·투자펀드 지분 순취득 (억 엔)"""
+    if kind != "equity_inflow":
+        raise ValueError(f"알 수 없는 재무성 항목: {kind}")
+    url = "https://www.mof.go.jp/policy/international_policy/reference/itn_transactions_in_securities/week.csv"
+    text = _get(url).content.decode("shift_jis", "replace")
+    dates, values = [], []
+    for row in pd.read_csv(io.StringIO(text), header=None, dtype=str).itertuples(index=False):
+        # 기간 예: '2026．10．18〜10．24', 연말에는 '2025．12．28〜 1．3' 또는 '2012．12．30〜 2013．1．5'.
+        # 주의 마지막 날을 날짜로 쓴다
+        m = re.match(r"(\d{4})．\s*(\d+)．\s*\d+〜\s*(?:(\d{4})．\s*)?(\d+)．\s*(\d+)", str(row[0]).strip())
+        if not m:
+            continue
+        year, m1, year2, m2, d2 = m.groups()
+        end_year = int(year2) if year2 else int(year) + (1 if int(m2) < int(m1) else 0)
+        dates.append(pd.Timestamp(end_year, int(m2), int(d2)))
+        values.append(str(row[14]).replace(",", "").strip())  # 2. 대내 증권투자 > 주식·투자펀드 지분 > 순
+    s = _series(dates, values)
+    return s[s.index >= start]
+
+
+def em(spec, start):
+    """동방재부 경제지표 데이터센터. spec: 국가보고서/지표ID, 예: USA/EMG00002790 (ISM 제조업 PMI)"""
+    report, indicator = spec.split("/")
+    params = {"reportName": f"RPT_ECONOMICVALUE_{report}", "columns": "REPORT_DATE,VALUE",
+              "filter": f'(INDICATOR_ID="{indicator}")', "pageNumber": "1", "pageSize": "5000",
+              "sortColumns": "REPORT_DATE", "sortTypes": "-1", "source": "WEB", "client": "WEB"}
+    data = _get("https://datacenter-web.eastmoney.com/api/data/v1/get", params=params).json()
+    rows = (data.get("result") or {}).get("data") or []
+    if not rows:
+        raise ValueError(f"동방재부 응답 없음: {data.get('message')}")
+    # REPORT_DATE는 지표의 기준 시점(월간은 그 달 1일, 금리 결정은 회의일). 아직 발표 전인 행은 값이 비어 있다
+    s = _series([r["REPORT_DATE"][:10] for r in rows], [r["VALUE"] for r in rows])
+    return s[s.index >= start]
+
+
+def nk225jp(field, start):
+    """nikkei225jp.com 일간 데이터 (닛케이 공표 가중평균 기준). field: per = 예상 PER, pbr = PBR"""
+    col = {"per": 12, "pbr": 13}[field]
+    url = "https://nikkei225jp.com/_data/_nfsDATA/data_DAY/daily2.json"
+    text = _get(url, headers={**HEADERS, "Referer": "https://nikkei225jp.com/data/per.php"}).text
+    dates, values = [], []
+    for line in text.splitlines():
+        line = line.strip().rstrip(",")
+        if not line.startswith("["):
+            continue
+        cells = line.strip("[]").split(",")
+        if len(cells) > col and cells[col].strip() not in ("", '""'):
+            dates.append(pd.Timestamp(int(cells[0]), unit="ms", tz="Asia/Tokyo").tz_localize(None).normalize())
+            values.append(cells[col])
+    s = _series(dates, values)
+    return s[(s.index >= start) & (s > 0)]
+
+
 def hkma_hibor3m(start):
     url = ("https://api.hkma.gov.hk/public/market-data-and-statistics/"
            "monthly-statistical-bulletin/er-ir/hk-interbank-ir-daily")
@@ -151,8 +205,8 @@ def hkma_hibor3m(start):
 # 요청 URL에 키가 들어가므로, 요청 오류는 URL 없이 다시 올린다.
 
 def ecos(spec, start):
-    """한국은행 ECOS. spec: 통계표/주기/항목, 예: 817Y002/D/010200000"""
-    stat, cycle, item = spec.split("/")
+    """한국은행 ECOS. spec: 통계표/주기/항목[/항목2], 예: 817Y002/D/010200000, 402Y016/M/30911201AA/D"""
+    stat, cycle, item = spec.split("/", 2)
     fmt = {"D": "%Y%m%d", "M": "%Y%m"}[cycle]
     end = pd.Timestamp.today()
     url = (f"https://ecos.bok.or.kr/api/StatisticSearch/{_secret('ECOS_API_KEY')}/json/kr/1/100000/"
@@ -294,7 +348,8 @@ AK = {
 
 # --- 진입점 ----------------------------------------------------------------
 
-API_KINDS = ("fred", "yf", "oecd-cli", "oecd-cpi", "ecb", "mof-jp", "hkma", "ak", "ecos", "krx", "estat")
+API_KINDS = ("fred", "yf", "oecd-cli", "oecd-cpi", "ecb", "mof-jp", "mof-flow", "hkma", "ak", "em", "nk225jp",
+             "ecos", "krx", "estat")
 
 
 def fetch(source, start, ohlcv=False):
@@ -317,6 +372,12 @@ def fetch(source, start, ohlcv=False):
         return ecb(arg, start)
     if kind == "mof-jp":
         return mof_jp(arg, start)
+    if kind == "mof-flow":
+        return mof_flow(arg, start)
+    if kind == "em":
+        return em(arg, start)
+    if kind == "nk225jp":
+        return nk225jp(arg, start)
     if kind == "hkma" and arg == "hibor3m":
         return hkma_hibor3m(start)
     if kind == "ecos":

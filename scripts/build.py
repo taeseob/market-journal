@@ -34,8 +34,9 @@ LINE, UP, DOWN, MA5, MA20 = "#2a78d6", "#e34948", "#2a78d6", "#eda100", "#52514e
 
 STALE_DAYS = {"일": 7, "주": 21, "월": 75, "분기": 230, "연": 450}
 SOURCE_NAMES = {"fred": "FRED", "yf": "Yahoo Finance", "oecd-cli": "OECD", "oecd-cpi": "OECD", "ecb": "ECB",
-                "mof-jp": "일본 재무성", "hkma": "HKMA", "ak": "AKShare", "ecos": "한국은행 ECOS", "krx": "KRX",
-                "estat": "e-Stat", "manual": "수동 입력"}
+                "mof-jp": "일본 재무성", "mof-flow": "일본 재무성", "hkma": "HKMA", "ak": "AKShare", "em": "동방재부",
+                "nk225jp": "nikkei225jp.com", "ecos": "한국은행 ECOS", "krx": "KRX", "estat": "e-Stat",
+                "manual": "수동 입력"}
 
 plt.rcParams.update({
     "font.family": "Malgun Gothic", "axes.unicode_minus": False, "font.size": 9,
@@ -292,6 +293,8 @@ def axis_chart(store, market, axis, pub, path):
             continue
         last, v = s.index[-1], s.iloc[-1]
         title = label(ind)
+        if ind.source == "manual" and len(s) < 12:
+            memo.append(f"{ind.name}: 수동 입력 값 {len(s)}개뿐 ({fmt_period(s.index[0], ind.freq)}부터)")
         if store.is_stale(ind, s):
             title += f"  (최신 {fmt_period(last, ind.freq)})"
             memo.append(f"{ind.name}: 최신 데이터가 {fmt_period(last, ind.freq)}로 지연")
