@@ -23,6 +23,8 @@ import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+from matplotlib.legend_handler import HandlerTuple  # noqa: E402
+from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator  # noqa: E402
 
 import spec  # noqa: E402
@@ -382,14 +384,31 @@ def axis_chart(store, market, axis, pub, path, ed):
     return memo
 
 
+MACD_SIGNAL, RSI_PERIOD = 9, 14  # 따로 정하지 않은 파라미터는 표준값
+
+
 def candles(daily, rule, periods):
-    """일봉을 주봉(W-FRI) 또는 월봉(ME)으로 묶고 종가·거래량 이동평균을 붙인다."""
+    """일봉을 주봉(W-FRI) 또는 월봉(ME)으로 묶고 이동평균, MACD, RSI를 붙인다.
+    MACD의 단기·장기 기간은 이동평균 기간과 같다."""
     w = daily.resample(rule).agg({"open": "first", "high": "max", "low": "min", "close": "last",
                                   "volume": "sum"}).dropna(subset=["close"])
     for n in periods:
         w[f"ma{n}"] = w["close"].rolling(n).mean()
         w[f"vma{n}"] = w["volume"].rolling(n).mean()
+    short, long_ = periods
+    c = w["close"]
+    w["macd"] = c.ewm(span=short, adjust=False).mean() - c.ewm(span=long_, adjust=False).mean()
+    w["signal"] = w["macd"].ewm(span=MACD_SIGNAL, adjust=False).mean()
+    w["hist"] = w["macd"] - w["signal"]
+    delta = c.diff()  # RSI는 Wilder 방식 (평활 계수 1/기간)
+    gain = delta.clip(lower=0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
+    w["rsi"] = 100 - 100 / (1 + gain / loss)
     return w
+
+
+def fmt_axis(y, _=None):
+    return f"{y:,.0f}" if abs(y) >= 100 else f"{y:,.2f}"
 
 
 def candle_chart(store, market, idx, pub, path, ed):
@@ -408,8 +427,8 @@ def candle_chart(store, market, idx, pub, path, ed):
     x = mdates.date2num(w.index - shift)  # 캔들을 기간 가운데에 둔다
     colors = np.where(w["close"] >= w["open"], UP, DOWN)
 
-    fig, (ax, axv) = plt.subplots(2, 1, figsize=(12, 6.4), sharex=True,
-                                  gridspec_kw={"height_ratios": [3, 1], "hspace": 0.06})
+    fig, (ax, axm, axr, axv) = plt.subplots(4, 1, figsize=(12, 9.4), sharex=True,
+                                            gridspec_kw={"height_ratios": [3, 1.1, 1, 1], "hspace": 0.08})
     ax.vlines(x, w["low"], w["high"], colors=colors, lw=0.8)
     body = (w["close"] - w["open"]).abs().to_numpy()
     body = np.maximum(body, (w["high"].max() - w["low"].min()) * 0.002)
@@ -422,7 +441,7 @@ def candle_chart(store, market, idx, pub, path, ed):
     ticks = sorted({float(f"{v:.2g}") for v in np.geomspace(w["low"].min(), w["high"].max(), 6)})
     ax.yaxis.set_major_locator(FixedLocator(ticks))
     ax.yaxis.set_minor_locator(NullLocator())
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:,.0f}" if abs(y) >= 100 else f"{y:,.2f}"))
+    ax.yaxis.set_major_formatter(FuncFormatter(fmt_axis))
     ax.set_ylabel("로그 눈금", color=INK2)
     last = w["close"].iloc[-1]
     ax.annotate(f"{last:,.2f}", xy=(x[-1], last), xytext=(8, 0), textcoords="offset points",
@@ -430,6 +449,33 @@ def candle_chart(store, market, idx, pub, path, ed):
     if in_progress:
         ax.annotate("진행 중", xy=(x[-1], w["high"].iloc[-1]), xytext=(0, 12), textcoords="offset points",
                     ha="center", fontsize=8, color=INK2)
+
+    # MACD: 히스토그램(MACD − 시그널)은 캔들과 같은 상승·하락 색
+    axm.bar(x, w["hist"], width=width, color=np.where(w["hist"] >= 0, UP, DOWN), alpha=0.5, linewidth=0)
+    l1, = axm.plot(x, w["macd"], color=MA_SHORT, lw=1.5)
+    l2, = axm.plot(x, w["signal"], color=MA_LONG, lw=1.5)
+    axm.axhline(0, color=MUTED, lw=1, ls=(0, (4, 3)))
+    hist_handle = (Patch(color=UP, alpha=0.5), Patch(color=DOWN, alpha=0.5))
+    axm.legend([l1, l2, hist_handle], [f"MACD ({short}·{long_})", f"시그널 ({MACD_SIGNAL})", "히스토그램"],
+               handler_map={tuple: HandlerTuple(ndivide=None, pad=0)}, loc="upper left", frameon=False,
+               fontsize=8, ncol=3)
+    scale = w["macd"].abs().max()
+    digits = 0 if scale >= 100 else 1 if scale >= 1 else 3  # 패널 값 크기에 맞춰 소수 자릿수를 통일
+    macd_fmt = lambda y, _=None: f"{y:,.{digits}f}"  # noqa: E731
+    axm.yaxis.set_major_formatter(FuncFormatter(macd_fmt))
+    axm.set_ylabel("MACD", color=INK2)
+    axm.annotate(macd_fmt(w["macd"].iloc[-1]), xy=(x[-1], w["macd"].iloc[-1]), xytext=(8, 0),
+                 textcoords="offset points", va="center", fontsize=8.5, color=INK)
+
+    # RSI
+    axr.plot(x, w["rsi"], color=LINE, lw=1.5)
+    for level in (20, 50, 80):
+        axr.axhline(level, color=MUTED, lw=1, ls=(0, (4, 3)))
+    axr.set_ylim(0, 100)
+    axr.set_yticks([20, 50, 80])
+    axr.set_ylabel(f"RSI ({RSI_PERIOD})", color=INK2)
+    axr.annotate(f"{w['rsi'].iloc[-1]:.1f}", xy=(x[-1], w["rsi"].iloc[-1]), xytext=(8, 0),
+                 textcoords="offset points", va="center", fontsize=8.5, color=INK)
 
     if w["volume"].fillna(0).sum() == 0:
         axv.text(0.5, 0.5, "데이터 없음: 출처에 거래량 없음", transform=axv.transAxes, ha="center",
@@ -458,7 +504,7 @@ def candle_chart(store, market, idx, pub, path, ed):
     fig.suptitle(f"{idx.name} · {ed.candle_name} · 기준일 {pub:%Y-%m-%d}", x=0.01, ha="left", fontsize=14,
                  fontweight="bold", color=INK)
     fig.text(0.01, 0.005, "출처: " + ", ".join(source_names([idx.source])), fontsize=8, color=MUTED)
-    fig.subplots_adjust(left=0.07, right=0.92, top=0.92, bottom=0.07)
+    fig.subplots_adjust(left=0.07, right=0.92, top=0.94, bottom=0.05)
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return vol_memo
