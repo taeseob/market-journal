@@ -34,7 +34,8 @@ LINE, UP, DOWN, MA5, MA20 = "#2a78d6", "#e34948", "#2a78d6", "#eda100", "#52514e
 
 STALE_DAYS = {"일": 7, "주": 21, "월": 75, "분기": 230, "연": 450}
 SOURCE_NAMES = {"fred": "FRED", "yf": "Yahoo Finance", "oecd-cli": "OECD", "oecd-cpi": "OECD", "ecb": "ECB",
-                "mof-jp": "일본 재무성", "hkma": "HKMA", "ak": "AKShare", "manual": "수동 입력"}
+                "mof-jp": "일본 재무성", "hkma": "HKMA", "ak": "AKShare", "ecos": "한국은행 ECOS", "krx": "KRX",
+                "estat": "e-Stat", "manual": "수동 입력"}
 
 plt.rcParams.update({
     "font.family": "Malgun Gothic", "axes.unicode_minus": False, "font.size": 9,
@@ -150,8 +151,8 @@ class Store:
         df = df[df.index <= self.pub]
         if close:
             df = df[df.index + close_offset(close) <= self.asof]
-        elif source.startswith("yf:"):
-            # 환율·선물 등은 하루 종일 거래되므로 발행일 당일 봉은 미확정으로 본다
+        else:
+            # 지표는 발행일 당일 날짜의 값을 미확정으로 본다 (환율·선물 장중 값, 장 마감 후 확정되는 금리 등)
             df = df[df.index < self.asof.normalize()]
         return df if ohlcv else df.iloc[:, 0].dropna()
 
@@ -257,8 +258,9 @@ class Store:
 # --- 차트 -----------------------------------------------------------------
 
 def _panel_header(ax, title, desc):
-    ax.set_title(title, loc="left", fontsize=10.5, fontweight="bold", color=INK, pad=17)
-    ax.text(0, 1.035, desc, transform=ax.transAxes, fontsize=8.5, color=INK2, va="bottom")
+    # 맑은 고딕 굵은체에는 수학 기호 '−'(U+2212) 글리프가 없어 일반 하이픈으로 바꾼다
+    ax.set_title(title.replace("−", "-"), loc="left", fontsize=10.5, fontweight="bold", color=INK, pad=17)
+    ax.text(0, 1.035, desc.replace("−", "-"), transform=ax.transAxes, fontsize=8.5, color=INK2, va="bottom")
 
 
 def _date_axis(ax, start, end):
@@ -438,6 +440,16 @@ def preserved_blocks(path):
     return blocks
 
 
+def correction_section(path):
+    """발행 후 덧붙인 '## 정정' 섹션. 다시 만들어도 그대로 붙인다."""
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
+        i = text.find("\n## 정정\n")
+        if i >= 0:
+            return text[i:].strip("\n")
+    return None
+
+
 def previous_report(market, pub):
     found = []
     for p in REPORTS.glob(f"*/*/{market.order}-{market.code}.md"):
@@ -456,6 +468,7 @@ def build_market(store, market, pub):
     charts.mkdir(parents=True, exist_ok=True)
     path = out / f"{market.order}-{market.code}.md"
     blocks = preserved_blocks(path)
+    correction = correction_section(path)
     prev = previous_report(market, pub)
     period_start = prev[0] + pd.Timedelta(days=1) if prev else pub - pd.DateOffset(months=1)
     prev_rel = prev[1].relative_to(spec.ROOT).as_posix() if prev else "none"
@@ -498,6 +511,10 @@ def build_market(store, market, pub):
         lines.append("")
         if memo:
             lines += ["데이터 메모:", ""] + [f"- {m}" for m in memo] + [""]
+    if correction:
+        while lines and lines[-1] == "":
+            lines.pop()
+        lines += ["", correction]
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     return path, all_memo
 

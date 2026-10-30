@@ -30,6 +30,12 @@ python -m venv .venv
 .venv/Scripts/python scripts/build.py --date 2026-10-30
 ```
 
+한국은행 ECOS, KRX, 일본 e-Stat 데이터를 받으려면 프로젝트 폴더의 `.env`에 키와 계정이 필요합니다 (`ECOS_API_KEY`, `KRX_ID`, `KRX_PW`, `ESTAT_APP_ID`). `.env`는 저장소에 올리지 않습니다.
+
 ## 데이터 출처
 
-FRED, Yahoo Finance, OECD, ECB, 일본 재무성, HKMA, AKShare. 모두 API 키 없이 받을 수 있는 경로만 씁니다.
+- 키 없이: FRED, Yahoo Finance, OECD, ECB, 일본 재무성, HKMA, AKShare
+- 키·계정 필요: 한국은행 ECOS, KRX 정보데이터시스템, 일본 e-Stat
+
+このサービスは、政府統計総合窓口(e-Stat)のAPI機能を使用していますが、サービスの内容は国によって保証されたものではありません。
+(이 서비스는 일본 정부통계 종합창구(e-Stat)의 API 기능을 사용하지만, 서비스 내용은 일본 정부가 보증하지 않습니다.)

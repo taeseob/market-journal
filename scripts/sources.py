@@ -2,9 +2,12 @@
 
 지표는 날짜 인덱스의 Series, 지수 일봉은 open/high/low/close/volume 열의 DataFrame으로 돌려준다.
 """
+import contextlib
 import io
+import os
 import re
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,6 +15,26 @@ import requests
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 TIMEOUT = 30
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_env(path=ROOT / ".env"):
+    """.env의 KEY=VALUE를 환경 변수로 읽는다. pykrx는 import할 때 KRX_ID/KRX_PW를 읽으므로 먼저 실행한다."""
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key.strip() and not key.strip().startswith("#"):
+                os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+_load_env()
+
+
+def _secret(name):
+    value = os.environ.get(name)
+    if not value:
+        raise ValueError(f".env에 {name}가 없음")
+    return value
 
 
 def _get(url, headers=HEADERS, tries=3, **kw):
@@ -124,6 +147,62 @@ def hkma_hibor3m(start):
     return s[s.index >= start]
 
 
+# --- 키·계정이 필요한 출처 (.env) --------------------------------------------
+# 요청 URL에 키가 들어가므로, 요청 오류는 URL 없이 다시 올린다.
+
+def ecos(spec, start):
+    """한국은행 ECOS. spec: 통계표/주기/항목, 예: 817Y002/D/010200000"""
+    stat, cycle, item = spec.split("/")
+    fmt = {"D": "%Y%m%d", "M": "%Y%m"}[cycle]
+    end = pd.Timestamp.today()
+    url = (f"https://ecos.bok.or.kr/api/StatisticSearch/{_secret('ECOS_API_KEY')}/json/kr/1/100000/"
+           f"{stat}/{cycle}/{start:{fmt}}/{end:{fmt}}/{item}")
+    try:
+        data = _get(url, headers=None).json()
+    except requests.RequestException as e:
+        raise RuntimeError(f"ECOS 요청 실패 ({type(e).__name__})") from None
+    rows = data.get("StatisticSearch", {}).get("row")
+    if not rows:
+        raise ValueError(f"ECOS 응답 없음: {data.get('RESULT', {}).get('MESSAGE', '')}")
+    return _series([pd.to_datetime(r["TIME"], format=fmt) for r in rows], [r["DATA_VALUE"] for r in rows])
+
+
+def krx(name, start):
+    """KRX 정보데이터시스템 (pykrx, 회원 계정 로그인). name: kospi_pbr | kospi_foreign"""
+    _secret("KRX_ID"), _secret("KRX_PW")
+    end = pd.Timestamp.today()
+    with contextlib.redirect_stdout(io.StringIO()):  # pykrx는 로그인할 때 아이디를 출력한다
+        from pykrx import stock
+
+        if name == "kospi_pbr":
+            s = stock.get_index_fundamental(f"{start:%Y%m%d}", f"{end:%Y%m%d}", "1001")["PBR"]
+            s = s[s > 0]
+        elif name == "kospi_foreign":
+            s = stock.get_market_trading_value_by_date(f"{start:%Y%m%d}", f"{end:%Y%m%d}", "KOSPI")["외국인합계"]
+            s = s / 1e12  # 원 → 조 원
+        else:
+            raise ValueError(f"알 수 없는 KRX 항목: {name}")
+    return _series(s.index, s.to_numpy())
+
+
+def estat(spec, start):
+    """일본 e-Stat. spec: 통계표ID/품목(cat01)/지역(area)/표장항목(tab), 예: 0004052037/0161/00000/3"""
+    sid, cat01, area, tab = spec.split("/")
+    params = {"appId": _secret("ESTAT_APP_ID"), "statsDataId": sid, "cdCat01": cat01, "cdArea": area, "cdTab": tab}
+    try:
+        data = _get("https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData", headers=None, params=params).json()
+    except requests.RequestException as e:
+        raise RuntimeError(f"e-Stat 요청 실패 ({type(e).__name__})") from None
+    body = data["GET_STATS_DATA"]
+    values = body.get("STATISTICAL_DATA", {}).get("DATA_INF", {}).get("VALUE", [])
+    if not values:
+        raise ValueError(f"e-Stat 응답 없음: {body['RESULT']['ERROR_MSG']}")
+    # 시간 코드 '2026001010' = 2026년 10월. 월 자리가 '00'이면 연간 값이라 뺀다
+    rows = [(v["@time"], v["$"]) for v in values if v["@time"][6:8] != "00"]
+    s = _series([pd.Timestamp(int(t[:4]), int(t[6:8]), 1) for t, _ in rows], [x for _, x in rows])
+    return s[s.index >= start]
+
+
 # --- AKShare (중국·홍콩) ----------------------------------------------------
 
 def _ak():
@@ -215,7 +294,7 @@ AK = {
 
 # --- 진입점 ----------------------------------------------------------------
 
-API_KINDS = ("fred", "yf", "oecd-cli", "oecd-cpi", "ecb", "mof-jp", "hkma", "ak")
+API_KINDS = ("fred", "yf", "oecd-cli", "oecd-cpi", "ecb", "mof-jp", "hkma", "ak", "ecos", "krx", "estat")
 
 
 def fetch(source, start, ohlcv=False):
@@ -240,4 +319,10 @@ def fetch(source, start, ohlcv=False):
         return mof_jp(arg, start)
     if kind == "hkma" and arg == "hibor3m":
         return hkma_hibor3m(start)
+    if kind == "ecos":
+        return ecos(arg, start)
+    if kind == "krx":
+        return krx(arg, start)
+    if kind == "estat":
+        return estat(arg, start)
     raise ValueError(f"알 수 없는 출처: {source}")

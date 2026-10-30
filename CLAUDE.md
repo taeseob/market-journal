@@ -178,7 +178,9 @@ market-journal/
   - 선행 PER만 공개된 경우 같은 날 지수 종가 ÷ PER로 EPS를 환산해 입력하고, `note`에 `PER x.x배에서 환산`이라고 적는다.
   - **값을 찾지 못하면 비워 둔다. 추정이나 기억으로 채우지 않는다.**
 - **계산 지표(calc):** 입력 지표의 주기가 다르면 직전 값을 이어서 쓴다 (forward fill).
-- **API 키:** 지금은 키가 필요 없는 출처만 쓴다. 키를 쓰게 되면 `.env`에 두고 (예: `ECOS_API_KEY`) 저장소에 올리지 않는다.
+- **API 키:** 한국은행 ECOS(`ECOS_API_KEY`), KRX 정보데이터시스템(`KRX_ID`, `KRX_PW`), 일본 e-Stat(`ESTAT_APP_ID`)은 `.env`에 둔다. `.env`는 저장소에 올리지 않고, 키 값을 화면·로그·보고서에 출력하지 않는다.
+  - KRX가 주기적으로 비밀번호 변경을 요구하면 로그인이 실패한다. krx.co.kr에서 비밀번호를 바꾼 뒤 `.env`를 고친다.
+  - 공개 저장소에서 e-Stat 데이터를 쓰므로 README의 e-Stat 크레딧 문구를 유지한다.
 - **실행 환경:** 프로젝트의 `.venv` 가상환경을 쓴다. 처음 설치는 `python -m venv .venv` 후 `.venv/Scripts/python -m pip install -r requirements.txt`.
 
 ## 작성 공통 규칙
