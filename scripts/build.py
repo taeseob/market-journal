@@ -23,7 +23,7 @@ import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-from matplotlib.ticker import FuncFormatter  # noqa: E402
+from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator  # noqa: E402
 
 import spec  # noqa: E402
 from fetch import STATUS, cache_key, cache_path  # noqa: E402
@@ -414,7 +414,13 @@ def candle_chart(store, market, idx, pub, path, ed):
     ax.plot(x, w["ma5"], color=MA5, lw=1.5, label=f"5{ed.ma_unit} 이평")
     ax.plot(x, w["ma20"], color=MA20, lw=1.5, label=f"20{ed.ma_unit} 이평")
     ax.legend(loc="upper left", frameon=False, fontsize=9)
+    # 가격 축은 로그 눈금. 기본 눈금(10의 거듭제곱)은 읽기 어려워 범위 안에 로그 간격으로 눈금을 직접 둔다
+    ax.set_yscale("log")
+    ticks = sorted({float(f"{v:.2g}") for v in np.geomspace(w["low"].min(), w["high"].max(), 6)})
+    ax.yaxis.set_major_locator(FixedLocator(ticks))
+    ax.yaxis.set_minor_locator(NullLocator())
     ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:,.0f}" if abs(y) >= 100 else f"{y:,.2f}"))
+    ax.set_ylabel("로그 눈금", color=INK2)
     last = w["close"].iloc[-1]
     ax.annotate(f"{last:,.2f}", xy=(x[-1], last), xytext=(8, 0), textcoords="offset points",
                 va="center", fontsize=9, color=INK, fontweight="bold")
