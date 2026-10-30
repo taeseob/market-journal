@@ -19,7 +19,7 @@ STATUS = CACHE / "_status.json"
 
 
 def lookback(years):
-    """차트 기간 + 20개월 이동평균(월봉) + 전년비 계산에 필요한 기간."""
+    """차트 기간 + 월봉 이동평균 + 전년비 계산에 필요한 기간 (여유 포함)."""
     return pd.DateOffset(years=years, months=33)
 
 

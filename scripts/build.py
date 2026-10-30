@@ -33,7 +33,7 @@ MANUAL = spec.ROOT / "data" / "manual.csv"
 
 # 색 (CLAUDE.md 차트 규칙)
 SURFACE, INK, INK2, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9"
-LINE, UP, DOWN, MA5, MA20 = "#2a78d6", "#e34948", "#2a78d6", "#eda100", "#52514e"
+LINE, UP, DOWN, MA_SHORT, MA_LONG = "#2a78d6", "#e34948", "#2a78d6", "#eda100", "#52514e"
 
 STALE_DAYS = {"일": 7, "주": 21, "월": 75, "분기": 230, "연": 450}
 
@@ -44,15 +44,17 @@ class Edition:
     years: int          # 지표·지수 차트 기간
     candle: str         # 지수 캔들 주기 (pandas resample 규칙)
     candle_name: str
-    ma_unit: str        # 이동평균 단위 (5주·20주, 5개월·20개월)
+    ma: tuple           # 이동평균 기간 (짧은 것, 긴 것)
+    ma_unit: str        # 이동평균 단위 (주, 개월)
     folder: str         # 발행 폴더 이름 형식
     folder_re: str
     title_suffix: str
 
 
 EDITIONS = {
-    "daily": Edition("daily", 3, "W-FRI", "주봉", "주", "%Y-%m-%d", r"\d{4}-\d\d-\d\d", ""),
-    "monthly": Edition("monthly", 10, "ME", "월봉", "개월", "%Y-%m", r"\d{4}-\d\d", " (10년)"),
+    # 주봉 5주 = 한 달, 13주 = 분기 / 월봉 6개월 = 반년, 12개월 = 1년
+    "daily": Edition("daily", 3, "W-FRI", "주봉", (5, 13), "주", "%Y-%m-%d", r"\d{4}-\d\d-\d\d", ""),
+    "monthly": Edition("monthly", 10, "ME", "월봉", (6, 12), "개월", "%Y-%m", r"\d{4}-\d\d", " (10년)"),
 }
 SOURCE_NAMES = {"fred": "FRED", "yf": "Yahoo Finance", "yf-fill": "Yahoo Finance·nikkei225jp.com",
                 "oecd-cli": "OECD", "oecd-cpi": "OECD", "ecb": "ECB",
@@ -380,11 +382,11 @@ def axis_chart(store, market, axis, pub, path, ed):
     return memo
 
 
-def candles(daily, rule):
-    """일봉을 주봉(W-FRI) 또는 월봉(ME)으로 묶고 5·20기간 이동평균을 붙인다."""
+def candles(daily, rule, periods):
+    """일봉을 주봉(W-FRI) 또는 월봉(ME)으로 묶고 종가·거래량 이동평균을 붙인다."""
     w = daily.resample(rule).agg({"open": "first", "high": "max", "low": "min", "close": "last",
                                   "volume": "sum"}).dropna(subset=["close"])
-    for n in (5, 20):
+    for n in periods:
         w[f"ma{n}"] = w["close"].rolling(n).mean()
         w[f"vma{n}"] = w["volume"].rolling(n).mean()
     return w
@@ -393,7 +395,8 @@ def candles(daily, rule):
 def candle_chart(store, market, idx, pub, path, ed):
     daily = store.ohlcv(idx.id)
     start = pub - pd.DateOffset(years=ed.years)
-    w = candles(daily, ed.candle)
+    w = candles(daily, ed.candle, ed.ma)
+    short, long_ = ed.ma
     w = w[w.index >= start]
     # 마지막 캔들 기간의 마지막 평일까지 데이터가 없으면 진행 중인 기간이다
     last_bday = w.index[-1]
@@ -411,8 +414,8 @@ def candle_chart(store, market, idx, pub, path, ed):
     body = (w["close"] - w["open"]).abs().to_numpy()
     body = np.maximum(body, (w["high"].max() - w["low"].min()) * 0.002)
     ax.bar(x, body, bottom=np.minimum(w["open"], w["close"]), width=width, color=colors, linewidth=0)
-    ax.plot(x, w["ma5"], color=MA5, lw=1.5, label=f"5{ed.ma_unit} 이평")
-    ax.plot(x, w["ma20"], color=MA20, lw=1.5, label=f"20{ed.ma_unit} 이평")
+    ax.plot(x, w[f"ma{short}"], color=MA_SHORT, lw=1.5, label=f"{short}{ed.ma_unit} 이평")
+    ax.plot(x, w[f"ma{long_}"], color=MA_LONG, lw=1.5, label=f"{long_}{ed.ma_unit} 이평")
     ax.legend(loc="upper left", frameon=False, fontsize=9)
     # 가격 축은 로그 눈금. 기본 눈금(10의 거듭제곱)은 읽기 어려워 범위 안에 로그 간격으로 눈금을 직접 둔다
     ax.set_yscale("log")
@@ -435,8 +438,8 @@ def candle_chart(store, market, idx, pub, path, ed):
         vol_memo = f"{idx.name}: 거래량 데이터 없음"
     else:
         axv.bar(x, w["volume"], width=width, color=colors, alpha=0.5, linewidth=0)
-        axv.plot(x, w["vma5"], color=MA5, lw=1.5)
-        axv.plot(x, w["vma20"], color=MA20, lw=1.5)
+        axv.plot(x, w[f"vma{short}"], color=MA_SHORT, lw=1.5)
+        axv.plot(x, w[f"vma{long_}"], color=MA_LONG, lw=1.5)
         axv.yaxis.set_major_formatter(FuncFormatter(kr_units))
         axv.annotate(kr_units(w["volume"].iloc[-1]), xy=(x[-1], w["volume"].iloc[-1]), xytext=(8, 0),
                      textcoords="offset points", va="center", fontsize=8.5, color=INK)
