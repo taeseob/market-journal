@@ -144,19 +144,24 @@ def close_offset(close):
     return pd.Timedelta(days=days, hours=int(hh), minutes=int(mm))
 
 
+def default_asof(pub):
+    """처음 만드는 보고서의 발행 시점(KST): 오늘이면 지금, 지난 날짜면 그날 23:59."""
+    now = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).floor("min")
+    return now if pub.normalize() == now.normalize() else pub + pd.Timedelta(hours=23, minutes=59)
+
+
 class Store:
     def __init__(self, markets, pub, asof=None):
         self.pub = pub
-        # 발행 시점(KST). 이미 발행한 보고서를 다시 만들면 그 보고서의 asof를 쓴다.
-        # 처음 만들 때는 오늘이면 지금, 지난 날짜면 그날 23:59
-        now = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).floor("min")
-        if asof is None:
-            asof = now if pub.normalize() == now.normalize() else pub + pd.Timedelta(hours=23, minutes=59)
-        self.asof = asof
         self.status = json.loads(STATUS.read_text(encoding="utf-8")) if STATUS.exists() else {}
         self.indicators = {i.id: i for m in markets for a in m.axes for i in a.indicators}
         self.indices = {x.id: x for m in markets for x in m.indices}
         self.manual = self._load_manual()
+        self.set_asof(asof or default_asof(pub))
+
+    def set_asof(self, asof):
+        """발행 시점은 시장 보고서마다 다를 수 있다. 바뀌면 계산해 둔 시계열을 버린다."""
+        self.asof = asof
         self._memo = {}
 
     @staticmethod
@@ -660,13 +665,10 @@ def build_market(store, market, pub, ed):
     return path, all_memo
 
 
-def existing_asof(folder):
-    """같은 폴더의 보고서가 이미 있으면 그 발행 시점을 돌려준다 (다시 만들어도 수치가 바뀌지 않게)."""
-    for p in sorted(folder.glob("*.md")):
-        asof = front_matter(p, "asof")
-        if asof:
-            return pd.Timestamp(asof)
-    return None
+def existing_asof(path):
+    """같은 시장 보고서가 이미 있으면 그 발행 시점을 돌려준다 (다시 만들어도 수치가 바뀌지 않게)."""
+    asof = front_matter(path, "asof") if path.exists() else None
+    return pd.Timestamp(asof) if asof else None
 
 
 def main():
@@ -682,11 +684,12 @@ def main():
     pub = pd.Timestamp(args.date)
     ed = EDITIONS[args.edition]
     markets = spec.load()
-    asof = pd.Timestamp(args.asof) if args.asof else existing_asof(out_dir(pub, ed))
-    store = Store(markets, pub, asof)
+    store = Store(markets, pub)
     for m in markets:
         if args.market and m.code != args.market:
             continue
+        report = out_dir(pub, ed) / f"{m.order}-{m.code}.md"
+        store.set_asof(pd.Timestamp(args.asof) if args.asof else existing_asof(report) or default_asof(pub))
         path, memo = build_market(store, m, pub, ed)
         print(f"{path.relative_to(spec.ROOT).as_posix()}  (데이터 메모 {len(memo)}건)")
         for line in memo:
