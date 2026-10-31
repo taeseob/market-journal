@@ -24,7 +24,7 @@ market-journal/
 │   ├── sources.py          # 출처별 수집 함수
 │   ├── fetch.py            # 데이터 수집 → data/cache/
 │   ├── build.py            # 차트·표·보고서 생성 → reports/
-│   └── pdf.py              # 발행 폴더의 보고서를 A4 PDF 한 파일로 묶기 (Chrome 또는 Edge 필요)
+│   └── export.py           # 발행 폴더의 보고서를 PDF·HTML 한 파일씩으로 내보내기
 └── reports/
     └── YYYY/
         ├── YYYY-MM-DD/     # 일간 보고서 (발행일별)
@@ -33,7 +33,8 @@ market-journal/
         │   ├── 03-cnhk.md
         │   ├── 04-jp.md
         │   ├── 05-eu.md
-        │   ├── market-journal-YYYY-MM-DD.pdf  # 5개 시장을 묶은 PDF (요청할 때만 만듦)
+        │   ├── market-journal-YYYY-MM-DD.pdf   # 5개 시장을 묶은 A4 PDF (요청할 때만 만듦)
+        │   ├── market-journal-YYYY-MM-DD.html  # 같은 내용의 HTML, 차트는 GitHub에서 불러옴 (요청할 때만 만듦)
         │   └── charts/
         └── YYYY-MM/        # 월간 보고서 (10년 지표 차트 버전, 같은 구성)
 ```
@@ -97,20 +98,24 @@ market-journal/
 
 스크립트가 없거나 `rules/indicators.md`와 맞지 않으면 먼저 스크립트를 작성하거나 고친 뒤 진행한다.
 
-## PDF 만들기
+## PDF·HTML 내보내기
 
-PDF는 사용자가 요청할 때만 만든다. 보고서 생성 절차에는 포함하지 않는다.
+PDF와 HTML은 사용자가 요청할 때만 만든다. 보고서 생성 절차에는 포함하지 않는다.
 
-- 명령: `.venv/Scripts/python scripts/pdf.py --date YYYY-MM-DD [--edition daily|monthly]`. 발행 폴더의 5개 시장 보고서를 A4 PDF 한 파일(`market-journal-{폴더명}.pdf`)로 묶어 같은 폴더에 저장한다.
-- 방식: 보고서 마크다운을 HTML로 바꾼 뒤 Chrome(없으면 Edge) 헤드리스로 인쇄한다. Chrome이나 Edge가 설치돼 있어야 한다.
+- 명령: `.venv/Scripts/python scripts/export.py --date YYYY-MM-DD [--edition daily|monthly] [--format pdf html]`. 발행 폴더의 5개 시장 보고서를 한 파일(`market-journal-{폴더명}.pdf`, `.html`)로 묶어 같은 폴더에 저장한다. `--format`을 빼면 둘 다 만든다.
+- 방식: 보고서 마크다운을 HTML로 바꾼다.
+  - PDF: 그 HTML을 Chrome(없으면 Edge) 헤드리스로 A4에 인쇄한다. 차트는 로컬 파일을 쓴다. Chrome이나 Edge가 설치돼 있어야 한다.
+  - HTML: 그 HTML을 저장한다. 차트는 GitHub 저장소(`raw.githubusercontent.com`)에서 불러오므로 파일 하나만 있으면 인터넷이 되는 곳 어디서든 열린다.
+- HTML의 차트 주소는 그 폴더의 차트를 마지막으로 바꾼 커밋에 고정한다. 그래서 차트가 바뀌지 않으면 다시 만들어도 HTML이 같다.
+  - 차트에 커밋하지 않은 변경이 있거나 GitHub에 아직 올리지 않았으면 스크립트가 멈춘다. 차트를 먼저 커밋하고 올린 뒤 HTML을 만들어 다시 올린다.
 - 구성:
-  - 시장마다 새 페이지에서 시작한다.
+  - 시장마다 새 페이지에서 시작한다 (HTML 화면에서는 구분선).
   - 시장 제목 아래에 발행 시점과 요약 대상 기간을 적는다.
-  - 쪽 하단에 보고서 종류·발행일과 쪽 번호를 넣는다.
-  - PDF 책갈피를 시장 → 절 → 축 단위로 만든다.
-  - 지표 축은 제목·차트·최신값 표·데이터 메모를 한 페이지에 둔다.
-- 확인: 만든 뒤 페이지를 열어 시장마다 새 페이지에서 시작하는지, 한글 깨짐과 잘림이 없는지 본다.
-- PDF는 만든 시점의 보고서 사본이다. PDF가 있는 폴더의 보고서를 나중에 고치면(정정 등) 완료 보고에서 PDF가 이전 내용이라고 알린다.
+  - PDF는 쪽 하단에 보고서 종류·발행일과 쪽 번호를 넣고, 책갈피를 시장 → 절 → 축 단위로 만든다.
+  - PDF에서 지표 축은 제목·차트·최신값 표·데이터 메모를 한 페이지에 둔다.
+  - HTML은 화면에서 본문 너비를 960px로 제한한다. 휴대폰처럼 좁은 화면에서는 표만 가로로 스크롤된다.
+- 확인: PDF는 페이지를 열어 시장마다 새 페이지에서 시작하는지, 한글 깨짐과 잘림이 없는지 본다. HTML은 브라우저로 열어 차트가 모두 불러와지는지 본다.
+- PDF와 HTML은 만든 시점의 보고서 사본이다. 이 파일들이 있는 폴더의 보고서를 나중에 고치면(정정 등) 완료 보고에서 이전 내용이라고 알린다.
 
 ## 보고서 구성
 

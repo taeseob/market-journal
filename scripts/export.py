@@ -1,9 +1,12 @@
-"""한 발행 폴더의 시장 보고서를 A4 PDF 한 파일로 묶는다. 시장마다 새 페이지에서 시작한다.
+"""한 발행 폴더의 시장 보고서를 A4 PDF와 HTML 한 파일씩으로 내보낸다. 시장마다 새 페이지에서 시작한다.
 
-사용법: python scripts/pdf.py [--date YYYY-MM-DD] [--edition daily|monthly]
-  → reports/YYYY/YYYY-MM-DD/market-journal-YYYY-MM-DD.pdf (월간은 YYYY-MM)
+사용법: python scripts/export.py [--date YYYY-MM-DD] [--edition daily|monthly] [--format pdf html]
+  → reports/YYYY/YYYY-MM-DD/market-journal-YYYY-MM-DD.pdf, .html (월간은 YYYY-MM)
 
-마크다운을 HTML로 바꾼 뒤 Chrome(없으면 Edge) 헤드리스로 인쇄한다.
+마크다운을 HTML로 바꾼 뒤
+  pdf   Chrome(없으면 Edge) 헤드리스로 인쇄한다. 차트는 로컬 파일을 쓴다.
+  html  그대로 저장한다. 차트는 GitHub 저장소에서 불러오므로 파일 하나만 있으면 어디서든 열린다.
+        차트 주소는 차트를 마지막으로 바꾼 커밋에 고정한다. 차트를 먼저 커밋하고 GitHub에 올려야 한다.
 """
 import argparse
 import html
@@ -60,6 +63,12 @@ th {{ color: {INK2}; font-weight: normal; border-bottom-color: {MUTED}; }}
 th:first-child, td:first-child {{ text-align: left; white-space: normal; }}
 .axis {{ break-inside: avoid; }}
 p:has(+ ul) {{ break-after: avoid; }}
+@media screen {{
+  body {{ max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; font-size: 15px; }}
+  .meta, table {{ font-size: 13px; }}
+  .table-wrap {{ overflow-x: auto; }}
+  section.market + section.market {{ margin-top: 56px; padding-top: 32px; border-top: 2px solid {MUTED}; }}
+}}
 """
 
 
@@ -74,6 +83,22 @@ def find_browser():
     raise SystemExit("Chrome 또는 Edge를 찾지 못했다.")
 
 
+def git(*args):
+    return subprocess.run(["git", *args], cwd=spec.ROOT, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def github_base(folder):
+    """차트를 마지막으로 바꾼 커밋의 GitHub 원본 주소. 차트가 아직 GitHub에 없으면 멈춘다."""
+    charts = (folder / "charts").relative_to(spec.ROOT).as_posix()
+    if git("status", "--porcelain", "--", charts):
+        raise SystemExit(f"{charts}에 커밋하지 않은 변경이 있다. 차트를 커밋하고 GitHub에 올린 뒤 다시 실행한다.")
+    commit = git("log", "-1", "--format=%H", "--", charts)
+    if not commit or not git("branch", "-r", "--contains", commit):
+        raise SystemExit(f"{charts}가 아직 GitHub에 없다. 커밋하고 올린 뒤 다시 실행한다.")
+    repo = re.search(r"github\.com[:/](.+?)(?:\.git)?$", git("remote", "get-url", "origin")).group(1)
+    return f"https://raw.githubusercontent.com/{repo}/{commit}/{folder.relative_to(spec.ROOT).as_posix()}/"
+
+
 def front_matter(text):
     m = re.match(r"---\n(.*?)\n---\n", text, re.S)
     meta = dict(line.split(": ", 1) for line in m.group(1).splitlines() if ": " in line)
@@ -86,31 +111,23 @@ def market_html(path):
     out = markdown.markdown(body, extensions=["tables"], tab_length=2)  # 보고서의 하위 목록은 2칸 들여쓰기
     note = f"발행 시점 {meta['asof']} KST · 요약 대상 기간 {meta['period']}"
     out = out.replace("</h1>", f'</h1>\n<p class="meta">{html.escape(note)}</p>', 1)
+    out = out.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
     # 지표 축(2.1~2.6)은 제목·차트·표·메모를 한 페이지에 둔다
     parts = re.split(r"(?=<h[23][ >])", out)
     out = "".join(f'<div class="axis">{p}</div>' if re.match(r"<h3>\d\.\d ", p) else p for p in parts)
     return f'<section class="market">\n{out}\n</section>'
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--date", default=f"{date.today():%Y-%m-%d}")
-    p.add_argument("--edition", choices=EDITIONS, default="daily")
-    args = p.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")
+def document(reports, title, base):
+    """시장 보고서들을 HTML 한 문서로 묶는다. 차트(charts/...)는 base 기준으로 불러온다."""
+    return (f'<!doctype html>\n<html lang="ko">\n<head>\n<meta charset="utf-8">\n'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            f'<title>{html.escape(title)}</title>\n<base href="{base}">\n'
+            f"<style>{CSS.replace('{footer}', title)}</style>\n</head>\n<body>\n"
+            + "\n".join(market_html(r) for r in reports) + "\n</body>\n</html>\n")
 
-    ed = EDITIONS[args.edition]
-    folder = out_dir(pd.Timestamp(args.date), ed)
-    reports = sorted(folder.glob("[0-9][0-9]-*.md"))
-    if not reports:
-        raise SystemExit(f"보고서가 없다: {folder}")
-    pdf = folder / f"market-journal-{folder.name}.pdf"
-    footer = f"Market Journal · {EDITION_NAMES[ed.key]} 보고서 {folder.name}"
-    doc = (f'<!doctype html>\n<html lang="ko">\n<head>\n<meta charset="utf-8">\n'
-           f'<title>{html.escape(footer)}</title>\n<base href="{folder.as_uri()}/">\n'
-           f"<style>{CSS.replace('{footer}', footer)}</style>\n</head>\n<body>\n"
-           + "\n".join(market_html(r) for r in reports) + "\n</body>\n</html>\n")
 
+def print_pdf(doc, pdf):
     pdf.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         page = Path(tmp) / "report.html"
@@ -121,7 +138,35 @@ def main():
                        check=True, capture_output=True, timeout=180)
     if not pdf.exists():
         raise SystemExit("PDF가 만들어지지 않았다.")
-    print(f"{pdf.relative_to(spec.ROOT).as_posix()}  (시장 {len(reports)}개, {pdf.stat().st_size / 1e6:.1f}MB)")
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--date", default=f"{date.today():%Y-%m-%d}")
+    p.add_argument("--edition", choices=EDITIONS, default="daily")
+    p.add_argument("--format", nargs="+", choices=["pdf", "html"], default=["pdf", "html"])
+    args = p.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8")
+
+    ed = EDITIONS[args.edition]
+    folder = out_dir(pd.Timestamp(args.date), ed)
+    reports = sorted(folder.glob("[0-9][0-9]-*.md"))
+    if not reports:
+        raise SystemExit(f"보고서가 없다: {folder}")
+    stem = folder / f"market-journal-{folder.name}"
+    title = f"Market Journal · {EDITION_NAMES[ed.key]} 보고서 {folder.name}"
+
+    outputs = []
+    if "html" in args.format:
+        path = stem.with_suffix(".html")
+        path.write_text(document(reports, title, github_base(folder)), encoding="utf-8")
+        outputs.append(path)
+    if "pdf" in args.format:
+        path = stem.with_suffix(".pdf")
+        print_pdf(document(reports, title, f"{folder.as_uri()}/"), path)
+        outputs.append(path)
+    for path in outputs:
+        print(f"{path.relative_to(spec.ROOT).as_posix()}  (시장 {len(reports)}개, {path.stat().st_size / 1e6:.1f}MB)")
 
 
 if __name__ == "__main__":
