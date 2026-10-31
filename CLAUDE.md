@@ -23,7 +23,8 @@ market-journal/
 │   ├── spec.py             # rules/indicators.md 읽기
 │   ├── sources.py          # 출처별 수집 함수
 │   ├── fetch.py            # 데이터 수집 → data/cache/
-│   └── build.py            # 차트·표·보고서 생성 → reports/
+│   ├── build.py            # 차트·표·보고서 생성 → reports/
+│   └── pdf.py              # 발행 폴더의 보고서를 A4 PDF 한 파일로 묶기 (Chrome 또는 Edge 필요)
 └── reports/
     └── YYYY/
         ├── YYYY-MM-DD/     # 일간 보고서 (발행일별)
@@ -32,6 +33,7 @@ market-journal/
         │   ├── 03-cnhk.md
         │   ├── 04-jp.md
         │   ├── 05-eu.md
+        │   ├── market-journal-YYYY-MM-DD.pdf  # 5개 시장을 묶은 PDF (요청할 때만 만듦)
         │   └── charts/
         └── YYYY-MM/        # 월간 보고서 (10년 지표 차트 버전, 같은 구성)
 ```
@@ -94,6 +96,21 @@ market-journal/
 7. **완료 보고.** 만든 파일 목록과 누락·지연된 지표를 사용자에게 알린다.
 
 스크립트가 없거나 `rules/indicators.md`와 맞지 않으면 먼저 스크립트를 작성하거나 고친 뒤 진행한다.
+
+## PDF 만들기
+
+PDF는 사용자가 요청할 때만 만든다. 보고서 생성 절차에는 포함하지 않는다.
+
+- 명령: `.venv/Scripts/python scripts/pdf.py --date YYYY-MM-DD [--edition daily|monthly]`. 발행 폴더의 5개 시장 보고서를 A4 PDF 한 파일(`market-journal-{폴더명}.pdf`)로 묶어 같은 폴더에 저장한다.
+- 방식: 보고서 마크다운을 HTML로 바꾼 뒤 Chrome(없으면 Edge) 헤드리스로 인쇄한다. Chrome이나 Edge가 설치돼 있어야 한다.
+- 구성:
+  - 시장마다 새 페이지에서 시작한다.
+  - 시장 제목 아래에 발행 시점과 요약 대상 기간을 적는다.
+  - 쪽 하단에 보고서 종류·발행일과 쪽 번호를 넣는다.
+  - PDF 책갈피를 시장 → 절 → 축 단위로 만든다.
+  - 지표 축은 제목·차트·최신값 표·데이터 메모를 한 페이지에 둔다.
+- 확인: 만든 뒤 페이지를 열어 시장마다 새 페이지에서 시작하는지, 한글 깨짐과 잘림이 없는지 본다.
+- PDF는 만든 시점의 보고서 사본이다. PDF가 있는 폴더의 보고서를 나중에 고치면(정정 등) 완료 보고에서 PDF가 이전 내용이라고 알린다.
 
 ## 보고서 구성
 

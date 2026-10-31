@@ -18,7 +18,7 @@
 | [`CLAUDE.md`](CLAUDE.md) | 보고서 작성 규칙 |
 | [`rules/indicators.md`](rules/indicators.md) | 시장별·축별 지표 정의와 출처 |
 | [`templates/report.md`](templates/report.md) | 보고서 템플릿 |
-| [`scripts/`](scripts/) | 데이터 수집(`fetch.py`)과 차트·보고서 생성(`build.py`) |
+| [`scripts/`](scripts/) | 데이터 수집(`fetch.py`), 차트·보고서 생성(`build.py`), A4 PDF 묶기(`pdf.py`) |
 | [`data/manual.csv`](data/manual.csv) | 수동 입력 지표 |
 
 ## 실행
@@ -28,7 +28,10 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt
 .venv/Scripts/python scripts/fetch.py --date 2026-10-30
 .venv/Scripts/python scripts/build.py --date 2026-10-30
+.venv/Scripts/python scripts/pdf.py --date 2026-10-30
 ```
+
+PDF는 필요할 때만 만듭니다. Chrome 또는 Edge로 인쇄하며, 발행 폴더에 `market-journal-YYYY-MM-DD.pdf`로 저장됩니다.
 
 한국은행 ECOS, KRX, 일본 e-Stat 데이터를 받으려면 프로젝트 폴더의 `.env`에 키와 계정이 필요합니다 (`ECOS_API_KEY`, `KRX_ID`, `KRX_PW`, `ESTAT_APP_ID`). `.env`는 저장소에 올리지 않습니다.
 
