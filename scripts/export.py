@@ -5,8 +5,8 @@
 
 마크다운을 HTML로 바꾼 뒤
   pdf   Chrome(없으면 Edge) 헤드리스로 인쇄한다. 차트는 로컬 파일을 쓴다.
-  html  그대로 저장한다. 차트는 GitHub 저장소에서 불러오므로 파일 하나만 있으면 어디서든 열린다.
-        차트 주소는 차트를 마지막으로 바꾼 커밋에 고정한다. 차트를 먼저 커밋하고 GitHub에 올려야 한다.
+  html  그대로 저장한다. 차트는 GitHub 저장소 main 브랜치에서 불러오므로 파일 하나만 있으면 어디서든 열린다.
+        차트를 main에 올려야 보이고, 항상 main의 최신 차트가 보인다.
 """
 import argparse
 import html
@@ -26,6 +26,7 @@ import spec
 from build import EDITIONS, INK, INK2, LINE, MUTED, GRID, out_dir
 
 EDITION_NAMES = {"daily": "일간", "monthly": "월간"}
+BRANCH = "main"  # HTML이 차트를 불러올 GitHub 브랜치
 
 BROWSERS = [
     r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
@@ -83,20 +84,12 @@ def find_browser():
     raise SystemExit("Chrome 또는 Edge를 찾지 못했다.")
 
 
-def git(*args):
-    return subprocess.run(["git", *args], cwd=spec.ROOT, capture_output=True, text=True, check=True).stdout.strip()
-
-
 def github_base(folder):
-    """차트를 마지막으로 바꾼 커밋의 GitHub 원본 주소. 차트가 아직 GitHub에 없으면 멈춘다."""
-    charts = (folder / "charts").relative_to(spec.ROOT).as_posix()
-    if git("status", "--porcelain", "--", charts):
-        raise SystemExit(f"{charts}에 커밋하지 않은 변경이 있다. 차트를 커밋하고 GitHub에 올린 뒤 다시 실행한다.")
-    commit = git("log", "-1", "--format=%H", "--", charts)
-    if not commit or not git("branch", "-r", "--contains", commit):
-        raise SystemExit(f"{charts}가 아직 GitHub에 없다. 커밋하고 올린 뒤 다시 실행한다.")
-    repo = re.search(r"github\.com[:/](.+?)(?:\.git)?$", git("remote", "get-url", "origin")).group(1)
-    return f"https://raw.githubusercontent.com/{repo}/{commit}/{folder.relative_to(spec.ROOT).as_posix()}/"
+    """GitHub 저장소 main 브랜치에 있는 이 폴더의 원본 주소."""
+    origin = subprocess.run(["git", "remote", "get-url", "origin"], cwd=spec.ROOT,
+                            capture_output=True, text=True, check=True).stdout.strip()
+    repo = re.search(r"github\.com[:/](.+?)(?:\.git)?$", origin).group(1)
+    return f"https://raw.githubusercontent.com/{repo}/{BRANCH}/{folder.relative_to(spec.ROOT).as_posix()}/"
 
 
 def front_matter(text):
